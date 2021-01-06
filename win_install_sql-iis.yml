@@ -1,0 +1,74 @@
+---
+- hosts: localhost
+  gather_facts: no
+  vars_prompt:
+  - name: hedef_host
+    prompt: Yukleme yapilacak IP adresini giriniz...
+    private: no
+  tasks:
+    - add_host:
+        name: "{{ hedef_host }}"
+        groups: host
+
+- hosts: host
+  gather_facts: false
+  tasks:
+    - name: Sql server yukleniyor ...
+      win_chocolatey:
+        name: '{{item}}'
+        state: present
+      with_items:
+        - sql-server-2017
+        - sql-server-management-studio
+      register: sql_install
+      ignore_errors: yes
+
+    - name: IIS yukleniyor ...
+      win_feature:
+        name: "Web-Server"
+        state: present
+        restart: no
+        include_sub_features: yes
+        include_management_tools: yes
+      ignore_errors: yes
+
+    - name: Yeniden baslatiliyor
+      win_reboot:
+      when: sql_install.changed
+
+    - name: Ftp ayarlari yapiliyor ...
+      win_shell: "{{item}}"
+      with_items:
+        - Import-Module WebAdministration
+        - New-WebFtpSite -Name "Default FTP Site" -Port 21 -PhysicalPath "C:\inetpub\ftproot\" -Force
+        - Import-Module WebAdministration; Set-ItemProperty -PATH "IIS:\Sites\Default FTP Site" -Name ftpServer.security.authentication.basicAuthentication.enabled -Value $true
+        - Import-Module WebAdministration; Set-ItemProperty -PATH 'IIS:\Sites\Default FTP Site' -Name ftpserver.userisolation -Value 3 
+        - Import-Module WebAdministration; Add-WebConfiguration -Filter /System.FtpServer/Security/Authorization -Value (@{AccessType="Allow"; Users="*"; Permissions="Read, Write"}) -PSPath 'IIS:' -Location "Default FTP Site/"
+        - Import-Module WebAdministration; Set-ItemProperty 'IIS:\Sites\Default FTP Site' -Name ftpServer.security.ssl.controlChannelPolicy -Value 0
+        - Import-Module WebAdministration; Set-ItemProperty 'IIS:\Sites\Default FTP Site' -Name ftpServer.security.ssl.dataChannelPolicy -Value 0
+        # User   - Import-Module WebAdministration; Add-WebConfiguration -Filter /System.FtpServer/Security/Authorization -Value (@{AccessType="Allow"; Users="Username"; Permissions="Read, Write"}) -PSPath 'IIS:' -Location "Default FTP Site/"
+      register: mesaj             
+      ignore_errors: yes
+
+    - name: w3svc reset
+      win_service:
+          name: w3svc
+          state: restarted
+      ignore_errors: yes
+
+    - name: Ftp LocalUser klasoru olusturuluyor
+      win_file:
+          path: C:/inetpub/ftproot/LocalUser
+          state: directory 
+      ignore_errors: yes
+      
+    - name: MSSQL Auth Mode ayarlaniyor...
+      win_shell: |
+          import-module sqlps -disablenamechecking
+          $s = new-object microsoft.sqlserver.management.smo.server '.'
+          $s.LoginMode = 'mixed'
+          $s.alter()
+          Restart-Service -Name "MSSQLSERVER"
+      ignore_errors: yes
+
+   

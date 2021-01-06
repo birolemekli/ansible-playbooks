@@ -1,0 +1,153 @@
+---
+
+- hosts: localhost
+  gather_facts: no
+  vars_prompt:
+
+  - name: hedef_host
+    prompt: Virtualhost tanimlamasi yapilacak IP adresini giriniz...
+    private: no
+
+  - name: username
+    prompt: 'Acilacak Kullanici adi giriniz...'
+    private: no
+  
+  - name: mailadresi
+    prompt: Bilgileri mail olarak almak istiyorsaniz mail adresinizi giriniz...
+    private: no
+
+  vars:
+    pwd_alias: "{{ lookup('password', '/dev/null length=12 chars=ascii_letters,digits,hexdigits,punctuation' ) }}"
+ 
+  tasks:
+    - set_fact:
+        ipadresi: "{{hedef_host}}"
+        username: "{{username}}"
+        mailadresi: "{{mailadresi}}"
+        sifre: "{{ pwd_alias }}"
+    - add_host:
+        name: "{{ hedef_host }}"
+        groups: host
+    
+- hosts: host
+  gather_facts: false
+  vars:
+    http_directory: 'C:\inetpub\wwwroot'
+    username: "{{ hostvars['localhost'].username }}"
+    mailadresi: "{{ hostvars['localhost'].mailadresi }}"
+    sifre: "{{ hostvars['localhost'].sifre }}"
+
+  tasks:
+    - name: Kullanici olusturuluyor...
+      win_user:
+        name: "{{username}}"
+        password:  "{{ sifre }}"
+        state: present
+        groups:
+          - Users
+      ignore_errors: True
+
+    - name: wwwroot altina {{username}} isimli klasor olusturuluyor ...
+      win_file:
+          path: '{{http_directory}}\{{username}}'
+          state: directory 
+
+    - name: Klasor kullanici izni duzenleniyor ...
+      win_acl:
+        path: '{{http_directory}}\{{username}}'
+        user: '{{username}}'
+        rights: FullControl
+        type: allow
+        state: present
+        propagation: 'None'
+      ignore_errors: True
+
+    - name: Application Pool oluşturuluyor
+      win_shell:  |
+                New-WebAppPool www.{{username}}.domain.com
+                New-WebAppPool {{username}}.domain.com
+      ignore_errors: True
+
+    - name: IIS {{username}} isimli yeni site tanimlaniyor ...
+      win_iis_website:
+        name: '{{item}}'
+        state: started
+        port: 80
+        hostname: '{{item}}'
+        physical_path: '{{http_directory}}\{{username}}'
+        application_pool: '{{item}}'
+      with_items: 
+        - '{{username}}.domain.com'
+        - 'www.{{username}}.domain.com'
+      notify: w3svc reset
+      ignore_errors: True
+
+
+    - name: Ftp Virtual Directory olusturuluyor ...
+      win_shell:  New-WebVirtualDirectory -Site "Default FTP Site\LocalUser" -Name {{username}} -PhysicalPath "{{http_directory}}\{{username}}"
+      ignore_errors: True
+
+    - name: Ornek index.html sayfasi olusturuluyor ...
+      win_copy:
+          dest: '{{http_directory}}\{{username}}\index.html'
+          content: "www.{{username}}.domain.com sitesi acilmistir"
+      ignore_errors: True
+
+    - name: Database olusturuluyor ...
+      win_shell: |
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO")
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SmoExtended")
+              $server = New-Object Microsoft.SqlServer.Management.Smo.Server("(local)")
+              $db = New-Object Microsoft.SqlServer.Management.Smo.Database($server, '{{username}}')
+              $db.Create()
+              $db.Alter()
+      ignore_errors: True
+
+    - name: Sql kullanici olusturuluyor ...
+      win_shell: |
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO")
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SmoExtended")
+              $login = new-object Microsoft.SqlServer.Management.Smo.Login("(local)", '{{username}}')
+              $login.LoginType = 'SqlLogin'
+              $login.PasswordPolicyEnforced = $false
+              $login.PasswordExpirationEnabled = $false
+              $login.Create('{{sifre}}')
+              $login.DefaultDatabase = "{{username}}"
+              $login.Alter()
+      ignore_errors: True
+
+    - name: Sql Database owner ve kullanici ViewAnyDatabase ayarlari duzenleniyor...
+      win_shell: |
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO")
+              [reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.SmoExtended")
+              $server = new-Object Microsoft.SqlServer.Management.Smo.Server("(local)")
+              $db = New-Object Microsoft.SqlServer.Management.Smo.Database
+              $db = $server.Databases.Item('{{username}}')
+              $db.SetOwner('{{username}}', $TRUE)
+              $db.Alter()
+
+              #Kullanici permission ayarları
+              $DBPermSet=[Microsoft.SqlServer.Management.Smo.ServerPermissionSet]::new()
+              $DBPermSet.Add([Microsoft.SqlServer.Management.Smo.ServerPermission]::ViewAnyDatabase)
+              $server.Deny($DBPermSet,'{{username}}')
+              $server.Alter()
+      ignore_errors: True
+
+    - name: Olusturulan kullanici ve sifre bilgileri...
+      debug:
+          msg:
+              -  "Kullanici Adi : {{username}} "
+              -  "Sifre : {{sifre}}"
+
+    - include: mail.yml
+
+  handlers:
+      - name: w3svc reset
+        win_service:
+          name: w3svc
+          state: restarted
+
+
+
+
+

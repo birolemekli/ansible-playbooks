@@ -1,0 +1,221 @@
+- hosts: localhost
+  gather_facts: no
+  vars_prompt:
+  - name: hedef_host
+    prompt: Yukleme yapilacak IP adresini giriniz...
+    private: no
+  tasks:
+    - add_host:
+        name: "{{ hedef_host }}"
+        groups: host
+
+- hosts: host
+
+#### Varible 
+  vars_prompt:
+     - name: hostname
+       prompt: 'Makine hostname degistirmek istiyorsaniz giriniz... '
+       default: localhost
+       private: no   
+  vars:
+    pwd_alias: "{{ lookup('password', '/dev/null length=12 chars=ascii_letters,digits') }}"
+  user: root
+  tasks:
+    - set_fact:
+        sifre: "{{ pwd_alias }}"
+
+    - name: Mysql Kullanıcı Adı ve Şifre
+      debug:
+        msg: ' Mysql sifresi :{{ sifre }} '   
+
+    - name: Hostname degisikligi
+      hostname:
+        name: "{{hostname}}"
+      become: True
+      ignore_errors: yes
+      when: hostname!=""
+
+    - name: Selinux disabled
+      selinux:
+        state: disabled
+      become: True
+      ignore_errors: yes
+
+    - name: Firewall disabled
+      service: name=firewalld state=stopped enabled=no
+      become: True
+      ignore_errors: yes
+
+    - name: Update
+      yum: name=* state=latest
+      become: True
+      ignore_errors: yes
+
+    - name: Restart
+      reboot:
+
+#### Yukleme bolumu
+
+
+    - name: HTTP yukleniyor...
+      action: yum name=httpd state=installed 
+      become: True
+      ignore_errors: yes
+      
+
+    - name: WGET yukleniyor...
+      yum: name=wget state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: Mysql repo indiriliyor...
+      get_url: url=http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm dest=/tmp/mysql-community-release-el7-5.noarch.rpm
+      become: True
+      ignore_errors: yes
+
+    - name: Mysql-Python yukleniyor...
+      yum: name=MySQL-python state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: RPM yukleniyor...
+      yum: name=/tmp/mysql-community-release-el7-5.noarch.rpm state=present
+      become: True
+      ignore_errors: yes
+
+    - name: Update
+      yum: name=* state=latest
+      become: True
+      ignore_errors: yes
+
+    - name: Mysql yukleniyor...
+      yum: name=mysql-server state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: PHP yukleniyor...
+      action: yum name=php,php-mysql,php-fpm state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: Epel yukleniyor...
+      action: yum name=epel-release state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: PhpMyAdmin yukleniyor...
+      action: yum name=phpmyadmin state=installed
+      become: True
+      ignore_errors: yes
+
+    - name: Vsftp yukleniyor...
+      action: yum name=vsftpd state=installed
+      become: True
+      ignore_errors: yes
+      
+
+### Start
+
+    - name: start mysqld
+      service: name=mysqld state=started enabled=yes
+
+    - name: start httpd
+      service: name=httpd state=started enabled=yes
+
+    - name: start vsftpd
+      service: name=vsftpd state=started enabled=yes
+
+
+##### Konfigurasyon
+
+    - name: vsftpd.conf ayarlari duzenleniyor...
+      lineinfile:
+        path: /etc/vsftpd/vsftpd.conf
+        regex: "{{ item.regex }}"
+        line: "{{ item.replace }}"
+        unsafe_writes: no
+      with_items:
+        - { regex: '^anonymous_enable=', replace: 'anonymous_enable=NO' }
+        - { regex: '^#xferlog_file=', replace: 'xferlog_file=/var/log/vsftpd.log' }
+        - { regex: '^#chroot_local_user=YES', replace: 'chroot_local_user=YES' }
+        - { regex: '^listen=', replace: 'listen=YES' } 
+        - { regex: '^listen_ipv6=', replace: 'listen_ipv6=NO' }
+        - { regex: '^ekle=', replace: 'allow_writeable_chroot=YES' }
+      become: True
+      ignore_errors: yes
+    
+    - name: Http directory izinleri duzenleniyor...
+      replace:
+        dest: /etc/httpd/conf/httpd.conf
+        regexp: "{{ item.regex }}"
+        replace: "{{ item.replace }}"
+        unsafe_writes: no
+      with_items:
+        - { regex: '(^<Directory />\n)(^.*AllowOverride.*\n)(^.*Require.*\n)(^</Directory.*)', replace: '\1\2#\3\4' }
+      become: True
+      ignore_errors: yes
+
+    - name: phpMyAdmin ayarlari duzenleniyor...
+      replace:
+        dest: /etc/httpd/conf.d/phpMyAdmin.conf
+        regexp: "{{ item.regex }}"
+        replace: "{{ item.replace }}"
+        unsafe_writes: no
+      with_items:
+        - { regex: '(^<Directory /usr/share/phpMyAdmin/.*\n)(^.*AddDefaultCharset.*\n)(\n*.*)(^.*<IfModule mod_authz_core.c>\n)(^.*# Apac.*\n)(^.*<RequireAny.*\n)(^.*Require ip.*\n)(^.*Require ip.*\n)(^.*RequireAny.*\n)(^.*IfModule.*\n)', replace: '\1\2\3\4\5\6\tRequire all granted\n#\7#\8\9\10' }
+      become: True
+      ignore_errors: yes
+  
+    - name: virtual.conf olusturuluyor...
+      blockinfile:
+            create: yes
+            path: /etc/httpd/conf/virtual.conf
+      become: true
+      ignore_errors: yes
+
+    - name: Virtualhost include ediliyor...
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regex: "{{ item.regex }}"
+        line: "{{ item.replace }}"
+        unsafe_writes: no
+      loop:
+        - { regex: '(^#NameVirtualHost.*)', replace: 'NameVirtualHost *:80' }
+        - { regex: '(^include conf/virtual.*)', replace: 'include conf/virtual.conf' }
+      become: True
+      ignore_errors: yes  
+
+    - name: Mysql secure sifre ataniyor...
+      mysql_user: name=root host={{ item }} password={{ sifre }} state=present
+      with_items:
+        - localhost
+      become: True
+      ignore_errors: yes
+
+  
+
+### Restart
+    - name: restart httpd
+      service: name=httpd state=restarted
+      ignore_errors: yes
+
+    - name: restart mysqld
+      service: name=mysqld state=restarted
+      ignore_errors: yes
+
+    - name: restart vsftpd
+      service: name=vsftpd state=restarted
+      ignore_errors: yes
+
+    - name: Mysql root sifresi...
+      debug:
+        msg: ' Mysql sifresi :{{ sifre }} '   
+    
+
+
+#    ___   __   __            ___      _      ___     ___     _     
+#   | _ )  \ \ / /    o O O  | _ )    (_)    | _ \   / _ \   | |    
+#   | _ \   \ V /    o       | _ \    | |    |   /  | (_) |  | |__  
+#   |___/   _|_|_   TS__[O]  |___/   _|_|_   |_|_\   \___/   |____| 
+# _|"""""|_| """ | {======|_|"""""|_|"""""|_|"""""|_|"""""|_|"""""| 
+# "`-0-0-'"`-0-0-'./o--000'"`-0-0-'"`-0-0-'"`-0-0-'"`-0-0-'"`-0-0-' 

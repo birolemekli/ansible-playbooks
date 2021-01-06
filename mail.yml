@@ -1,0 +1,41 @@
+    - mail:
+        host: sunucuIpAdres
+        port: 25
+        from: from@mailadresi
+        username: username@mailadresi
+        password: usernameşifre
+        to: <{{mailadresi}}>
+        subject: Virtualhost Bilgileri
+        body: |
+                Islemlerinize istinaden {{username}}.domain.com acilmis ve gerekli bilgiler asagida belirtilmistir.
+
+
+                        FTP Bilgileri
+                -----------------------------------------
+                  Sunucu        = {{username}}.domain.com
+                  Kullanici Adi = {{username}}
+                  Sifre         = {{sifre}}
+
+
+                        SQL Bilgileri
+                -----------------------------------------
+                  Sunucu         = localhost
+                  Veritabani Adı = {{username}}
+                  Kullanici Adi  = {{username}}
+                  Sifre          = {{sifre}}
+
+      delegate_to: localhost
+      when: mailadresi!=""
+      ignore_errors: yes
+      register: result
+#    ___   __   __            ___      _      ___     ___     _     
+#   | _ )  \ \ / /    o O O  | _ )    (_)    | _ \   / _ \   | |    
+#   | _ \   \ V /    o       | _ \    | |    |   /  | (_) |  | |__  
+#   |___/   _|_|_   TS__[O]  |___/   _|_|_   |_|_\   \___/   |____| 
+# _|"""""|_| """ | {======|_|"""""|_|"""""|_|"""""|_|"""""|_|"""""| 
+# "`-0-0-'"`-0-0-'./o--000'"`-0-0-'"`-0-0-'"`-0-0-'"`-0-0-'"`-0-0-' 
+    - name: Mail hata kontrolu...
+      fail:
+        msg: " **** Mail gonderilirken bir aksilik olustu **** "
+      when: result is failed
+      ignore_errors: True

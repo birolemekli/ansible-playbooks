@@ -1,0 +1,74 @@
+- hosts: localhost
+  gather_facts: no
+  vars_prompt:
+  - name: vcenter_hostname
+    prompt: vCenter IP adresi yada alan adini giriniz...
+    private: no
+  
+  - name: vcenter_username
+    prompt: vCenter kullanici adinizi giriniz...
+    private: no
+
+  - name: vcenter_password
+    prompt: vCenter sifrenizi giriniz...
+    private: no
+  
+  - name: vm_name
+    prompt: Yeni sanal makine adini giriniz...
+    private: no
+  
+  - name: isletim_sistemi
+    prompt: Yeni sanal makine isletim sistemini giriniz...
+    private: no
+
+  - name: disk_boyutu
+    prompt: Yeni sanal makine disk boyutunu giriniz...
+    private: no
+  
+  - name: ram
+    prompt: Yeni sanal makine RAM MB cinsinden giriniz...
+    private: no
+  
+  - name: cpu
+    prompt: Yeni sanal makine CPU giriniz...
+    private: no
+  
+  - name: iso
+    prompt: Yeni sanal makine ISO dosyasinin yolunu belirtiniz giriniz...
+    private: no
+  - name: vlan
+    prompt: Yeni sanal makine vlan giriniz...
+    private: no
+  vars:
+    datacenter:  DataCenter
+  tasks:    
+    - name: Create a virtual machine on given ESXi hostname
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        datacenter: "{{ datacenter }}"
+        validate_certs: no
+        folder: /25-Ansible
+        name: "{{vm_name}}"
+        state: poweredon
+        guest_id: "{{isletim_sistemi}}"
+        cluster: UCS CLUSTER
+        disk:
+        - size_gb: "{{disk_boyutu}}"
+          type: eagerzeroedthick
+          autoselect_datastore: true
+        hardware:
+          memory_mb: "{{ram}}"
+          num_cpus: "{{cpu}}"
+          scsi: paravirtual
+        cdrom:
+          type: iso
+          iso_path: "{{iso}}"
+        networks:
+        - name: "{{vlan}}"
+          device_type: vmxnet3
+        wait_for_ip_address: no
+      delegate_to: localhost
+      register: deploy_vm
+
